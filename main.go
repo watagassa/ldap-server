@@ -1,12 +1,10 @@
 package main
 
 import (
-	"crypto/tls"
 	"log"
 	"os"
 	"os/signal"
 	"regexp"
-	"strings"
 	"syscall"
 
 	ldap "github.com/vjeantet/ldapserver"
@@ -33,7 +31,6 @@ func main() {
 
 	// AuthenticationChoice で Simple Bind と SASL Bind のルーティングを分離
 	routes.Bind(handleSimpleBind).AuthenticationChoice("simple")
-	routes.Bind(handleSaslBind).AuthenticationChoice("sasl")
 
 	routes.Extended(handleWhoAmI).
 		RequestName(ldap.NoticeOfWhoAmI).Label("Ext - WhoAmI")
@@ -72,37 +69,6 @@ func handleSimpleBind(w ldap.ResponseWriter, m *ldap.Message) {
 	log.Printf("[Simple Bind] Failed for DN: %s", bindDN)
 	res.SetResultCode(ldap.LDAPResultInvalidCredentials)
 	res.SetDiagnosticMessage("invalid credentials")
-	w.Write(res)
-}
-
-// SASL Bind 用ハンドラ　go get github.com/vjeantet/ldapserver@masterでないとSASL EXTERNALが使えないので注意
-func handleSaslBind(w ldap.ResponseWriter, m *ldap.Message) {
-	r := m.GetBindRequest()
-	mech := string(r.AuthenticationSasl().Mechanism())
-
-	// EXTERNAL メカニズム以外の拒否
-	if strings.ToUpper(mech) != "EXTERNAL" {
-		res := ldap.NewBindResponse(ldap.LDAPResultAuthMethodNotSupported)
-		res.SetDiagnosticMessage("SASL mechanism not supported: " + mech)
-		w.Write(res)
-		return
-	}
-
-	res := ldap.NewBindResponse(ldap.LDAPResultSuccess)
-
-	// TLS 接続経由の場合、クライアント証明書情報を取得して検証
-	if tlsConn, ok := m.Client.GetConn().(*tls.Conn); ok {
-		state := tlsConn.ConnectionState()
-		if len(state.PeerCertificates) > 0 {
-			cert := state.PeerCertificates[0]
-			log.Printf("[SASL EXTERNAL] Verified Peer Certificate Subject: %s", cert.Subject.String())
-			w.Write(res)
-			return
-		}
-	}
-
-	// クライアント証明書が見つからない場合の処理（必要に応じて失敗応答に変更可能）
-	log.Println("[SASL EXTERNAL] Accepted without peer certificate check")
 	w.Write(res)
 }
 
